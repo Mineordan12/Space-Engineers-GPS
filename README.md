@@ -1,2 +1,170 @@
-# Space-Engineers-GPS
-PY script for storing, organizing, and reading GPS signals in SE
+# Space Engineers GPS Navigator
+
+A terminal tool for sharing Space Engineers GPS waypoints with your group through
+one live MySQL database — add a GPS, it's instantly searchable by everyone else
+pointed at the same database.
+
+Current version: **2.2.0** (run `python3 se_gps_navigator.py --version`)
+
+## Features
+
+- **Shared, live database** — everyone reads/writes the same MySQL instance, no
+  passing GPS strings around in Discord.
+- **Paste-to-add** — paste a Space Engineers `GPS:...` string directly, or enter
+  coordinates manually.
+- **Automatic ore detection** — recognizes Fe, Ni, Co, Si, Mg, Ag, Au, Pt, U,
+  Ice, Stone from the GPS name/description.
+- **Multi-resource splitting** — a deposit named e.g. `"Iron/Silicon/Gold"` is
+  offered as three separate GPS signals instead of one ambiguous one.
+- **Duplicate merging** — a new report of the same ore within **1.5 km** of an
+  existing marker is merged into it instead of creating a near-duplicate. The
+  position becomes a running weighted average and a `report_count` tracks how
+  many times it's been confirmed.
+- **Automatic clustering** — nearby markers (within 100 km) are grouped into a
+  named cluster (Stargate-style names, e.g. `P3X-263`) so search results and
+  listings can be organized by site instead of one long flat list.
+- **Location tags** — mark a GPS as an Asteroid, Planet, or Station when adding
+  it (stations skip the ore-detection prompts entirely, since they have no
+  resource).
+- **Search by ore or by name/cluster**, sorted by distance from a pasted
+  current-position GPS string.
+- **"Where am I"** — paste your current position and find out which cluster
+  you're in (or the nearest one, if you're not inside any).
+- **Rename / delete** entries and clusters after the fact.
+- **Resilient to DB hiccups** — automatically retries with backoff if the
+  database doesn't respond right away or drops mid-operation, instead of
+  crashing.
+- **Self-updating** — can check a remote manifest for a newer version and pull
+  it down from inside the app.
+
+## Requirements
+
+- Python 3.10+
+- [`pymysql`](https://pypi.org/project/PyMySQL/): `pip install pymysql`
+- Optional: [`pyperclip`](https://pypi.org/project/pyperclip/) for clipboard
+  copy/paste support (`pip install pyperclip`)
+- A MySQL (or MariaDB) server reachable from every player's machine
+
+## Setup
+
+### 1. Create the database and a user
+
+On your MySQL server:
+
+```sql
+CREATE DATABASE se_gps_navigator;
+CREATE USER 'se_gps'@'%' IDENTIFIED BY 'a-real-password-here';
+GRANT ALL PRIVILEGES ON se_gps_navigator.* TO 'se_gps'@'%';
+FLUSH PRIVILEGES;
+```
+
+The app creates its own tables on first run — no schema file to import.
+
+### 2. Run it
+
+```bash
+python3 se_gps_navigator.py
+```
+
+The **first time** it runs (or if the saved config still has the placeholder
+password), it will interactively ask for the host, port, username, password,
+and database name, and save them to `~/.se_gps_navigator/db_config.json`
+(permissions locked to `600` — owner read/write only). Every player runs this
+once, pointed at the same MySQL server.
+
+You can skip the prompt entirely by setting environment variables instead
+(useful for scripted/unattended setups):
+
+```
+SE_GPS_DB_HOST=203.0.113.10
+SE_GPS_DB_PORT=3306
+SE_GPS_DB_USER=se_gps
+SE_GPS_DB_PASSWORD=a-real-password-here
+SE_GPS_DB_NAME=se_gps_navigator
+```
+
+## Users & roles
+
+The app doesn't implement its own permission system — MySQL already has one,
+and it's a better fit than reinventing it in the app. Create different MySQL
+accounts per role and give each group of players the matching one:
+
+```sql
+-- Read-only: can search and list, cannot add/rename/delete
+CREATE USER 'se_gps_readonly'@'%' IDENTIFIED BY 'pw1';
+GRANT SELECT ON se_gps_navigator.* TO 'se_gps_readonly'@'%';
+
+-- Standard member: can add GPS entries and read everything
+CREATE USER 'se_gps_member'@'%' IDENTIFIED BY 'pw2';
+GRANT SELECT, INSERT, UPDATE ON se_gps_navigator.* TO 'se_gps_member'@'%';
+
+-- Admin: full control, including deletes
+CREATE USER 'se_gps_admin'@'%' IDENTIFIED BY 'pw3';
+GRANT ALL PRIVILEGES ON se_gps_navigator.* TO 'se_gps_admin'@'%';
+
+FLUSH PRIVILEGES;
+```
+
+Each player configures the app with the account they were given. If someone
+with a read-only account tries to add/rename/delete, the app recognizes the
+MySQL permission error and shows a clear message instead of retrying uselessly
+or crashing.
+
+## Auto-update
+
+The app can check a small JSON manifest for a newer version:
+
+```json
+{ "version": "2.3.0", "url": "https://raw.githubusercontent.com/<you>/<repo>/main/se_gps_navigator.py" }
+```
+
+Host that manifest wherever's convenient (a raw file in this repo works fine)
+and point the app at it:
+
+```
+SE_GPS_UPDATE_URL=https://raw.githubusercontent.com/<you>/<repo>/main/manifest.json
+```
+
+If a newer version is found, the main menu shows an `[!] Update available`
+notice and an extra menu option to download and install it in place (the
+current file is backed up as `se_gps_navigator.py.bak` first). You'll need to
+restart the app after updating. Leave `SE_GPS_UPDATE_URL` unset to disable
+update checking entirely — it's opt-in.
+
+## How clustering & merging work
+
+- **Clustering**: any two markers within 100 km are grouped into the same
+  named cluster. New entries automatically join a cluster whose name is
+  mentioned in the GPS name (e.g. typing `"DC-32 Gold"` when a `DC-32` cluster
+  exists), or the nearest cluster within range, or start a brand-new one.
+- **Duplicate merging**: within a cluster, two reports of the *same ore type*
+  within 1.5 km of each other are treated as the same physical deposit and
+  merged into a single entry rather than kept as two markers.
+
+## Database resilience
+
+- If the database doesn't respond when connecting, the app retries a few
+  times with increasing backoff before giving up with a clear error.
+- If the connection drops mid-operation (e.g. the server restarts while a
+  rename/delete/add is in flight), simple single-step operations (renames,
+  deletes) automatically retry the whole step with a fresh connection — no
+  re-entering data. The interactive "Add GPS" flow does the same for the
+  initial connection, but if the drop happens *while* you're mid-wizard, it
+  will tell you plainly and suggest checking "List all entries" before
+  retrying, rather than silently guessing what already saved.
+- Permission errors (wrong role/account) are never retried — they fail fast
+  with a clear message.
+
+## Known limitations
+
+- Multi-step add operations (e.g. a multi-resource split) aren't a single
+  atomic database transaction. If the connection drops partway through, some
+  of the entries may have already saved. This is called out explicitly when
+  it happens rather than silently retried, since automatically redoing it
+  could create duplicates.
+- The auto-updater replaces the script file in place; it does not restart the
+  running process automatically.
+
+## License
+
+MIT — do what you want with it.
