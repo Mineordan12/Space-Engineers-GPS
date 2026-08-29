@@ -36,7 +36,7 @@ except ImportError:
 
 # ── Version ─────────────────────────────────────────────────────────
 
-VERSION = "2.2.0"
+VERSION = "2.2.1"
 
 # Raw URL to a small JSON manifest in the GitHub repo, e.g.:
 #   {"version": "2.3.0", "url": "https://raw.githubusercontent.com/<you>/<repo>/main/se_gps_navigator.py"}
