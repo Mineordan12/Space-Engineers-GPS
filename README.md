@@ -4,7 +4,7 @@ A terminal tool for sharing Space Engineers GPS waypoints with your group throug
 one live MySQL database — add a GPS, it's instantly searchable by everyone else
 pointed at the same database.
 
-Current version: **2.4.0** (run `python3 se_gps_navigator.py --version`)
+Current version: **2.4.2** (run `python3 se_gps_navigator.py --version`)
 
 ## Features
 
