@@ -41,7 +41,7 @@ VERSION = "2.3.0"
 # Raw URL to a small JSON manifest in the GitHub repo, e.g.:
 #   {"version": "2.3.0", "url": "https://raw.githubusercontent.com/<you>/<repo>/main/se_gps_navigator.py"}
 # Leave UPDATE_MANIFEST_URL blank to disable update checking entirely.
-UPDATE_MANIFEST_URL = os.environ.get("SE_GPS_UPDATE_URL", "https://raw.githubusercontent.com/Mineordan12/Space-Engineers-GPS/refs/heads/main/se_gps_navigator.py")
+UPDATE_MANIFEST_URL = os.environ.get("SE_GPS_UPDATE_URL", "https://raw.githubusercontent.com/Mineordan12/Space-Engineers-GPS/refs/heads/main/manifest.json")
 
 
 def _parse_version(v: str) -> tuple:
