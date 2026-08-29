@@ -36,7 +36,7 @@ except ImportError:
 
 # ── Version ─────────────────────────────────────────────────────────
 
-VERSION = "2.4.0"
+VERSION = "2.4.1"
 
 # Raw URL to a small JSON manifest in the GitHub repo, e.g.:
 #   {"version": "2.3.0", "url": "https://raw.githubusercontent.com/<you>/<repo>/main/se_gps_navigator.py"}
@@ -503,7 +503,7 @@ def db_insert_entry(conn, entry: dict) -> int:
 
 # Clusters within this range of each other share a naming "prefix" so
 # that a glance at two names hints whether the sites are close.
-NAME_GROUP_RADIUS = 2_000_000  # 2000km
+NAME_GROUP_RADIUS = 1_000_000  # 1000km
 
 
 def _find_group_prefix(data: dict, x: float, y: float, z: float, exclude_cluster_id=None) -> str | None:
