@@ -35,7 +35,7 @@ except ImportError:
     sys.exit(1)
 
 
-VERSION = "2.4.1"
+VERSION = "2.4.2"
 
 
 UPDATE_MANIFEST_URL = os.environ.get("SE_GPS_UPDATE_URL", "https://raw.githubusercontent.com/Mineordan12/Space-Engineers-GPS/main/manifest.json")
