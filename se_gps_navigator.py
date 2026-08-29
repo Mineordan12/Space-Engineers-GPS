@@ -34,13 +34,10 @@ except ImportError:
     print("This version needs PyMySQL. Install it with:\n    pip install pymysql")
     sys.exit(1)
 
-# ── Version ─────────────────────────────────────────────────────────
 
 VERSION = "2.4.1"
 
-# Raw URL to a small JSON manifest in the GitHub repo, e.g.:
-#   {"version": "2.3.0", "url": "https://raw.githubusercontent.com/<you>/<repo>/main/se_gps_navigator.py"}
-# Leave UPDATE_MANIFEST_URL blank to disable update checking entirely.
+
 UPDATE_MANIFEST_URL = os.environ.get("SE_GPS_UPDATE_URL", "https://raw.githubusercontent.com/Mineordan12/Space-Engineers-GPS/main/manifest.json")
 
 
@@ -105,16 +102,6 @@ def perform_update(manifest: dict) -> bool:
     print("  [i] Restart the script to run the new version.")
     return True
 
-
-# ── Config ──────────────────────────────────────────────────────────
-#
-# Connection settings are read from a small JSON config file and can
-# be overridden with environment variables — handy if several people
-# run this script from their own machines and don't want to hand-edit
-# a file:
-#
-#   SE_GPS_DB_HOST      SE_GPS_DB_PORT     SE_GPS_DB_USER
-#   SE_GPS_DB_PASSWORD  SE_GPS_DB_NAME
 
 CONFIG_FILE = Path.home() / ".se_gps_navigator" / "db_config.json"
 CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -218,8 +205,6 @@ def load_config() -> dict:
 _CONFIG = None
 
 
-# ── DB resilience: retry-on-connect, retry-mid-operation ────────────
-
 class DatabaseUnavailable(Exception):
     """Raised when the database can't be reached after retrying, or
     when the connected account doesn't have permission (not retried —
@@ -227,13 +212,11 @@ class DatabaseUnavailable(Exception):
     pass
 
 
-DB_CONNECT_RETRIES = 3       # attempts when first opening a connection
-DB_ACTION_RETRIES = 2        # extra attempts if a connection drops mid-operation
-DB_RETRY_BASE_DELAY = 2      # seconds; multiplied by the attempt number
+DB_CONNECT_RETRIES = 3
+DB_ACTION_RETRIES = 2
+DB_RETRY_BASE_DELAY = 2
 
-# MySQL error numbers that mean "this account isn't allowed to do
-# that" — retrying won't help, so fail fast with a clear message
-# instead of silently retrying a doomed request 3 times.
+
 DB_ACCESS_DENIED_ERRNOS = {1044, 1045, 1142, 1143, 1698}
 
 
@@ -297,7 +280,7 @@ def run_db(work, *args, retries: int = DB_ACTION_RETRIES, **kwargs):
     Raises DatabaseUnavailable if every attempt fails.
     """
     last_err = None
-    for attempt in range(1, retries + 2):  # +1 for the initial try
+    for attempt in range(1, retries + 2):
         conn = None
         try:
             conn = get_connection()
@@ -407,7 +390,7 @@ def init_db():
     run_db(_init_db_work)
 
 
-STARGATE_LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ"  # No I, O to avoid confusion
+STARGATE_LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ"
 STARGATE_DIGITS = "0123456789"
 
 ORE_ALIASES = {
@@ -424,7 +407,6 @@ ORE_ALIASES = {
     "stone": ["stone"],
 }
 
-# ── Data ────────────────────────────────────────────────────────────
 
 def _load_data_work(conn) -> dict:
     with conn.cursor() as cur:
@@ -499,11 +481,7 @@ def db_insert_entry(conn, entry: dict) -> int:
     return new_id
 
 
-# ── Stargate Name Generator ────────────────────────────────────────
-
-# Clusters within this range of each other share a naming "prefix" so
-# that a glance at two names hints whether the sites are close.
-NAME_GROUP_RADIUS = 1_000_000  # 1000km
+NAME_GROUP_RADIUS = 1_000_000
 
 
 def _find_group_prefix(data: dict, x: float, y: float, z: float, exclude_cluster_id=None) -> str | None:
@@ -561,13 +539,11 @@ def generate_stargate_name(existing_names: set, data: dict = None, x: float = No
             return name
         attempts += 1
 
-    # Fallback with extended suffix
+
     use_prefix = prefix or _random_prefix()
     suffix = random.randint(1000, 9999)
     return f"{use_prefix}-{suffix}"
 
-
-# ── GPS Parsing ─────────────────────────────────────────────────────
 
 def parse_se_gps_string(text: str) -> dict | None:
     """
@@ -608,8 +584,6 @@ def format_se_gps_string(entry: dict) -> str:
     return f"GPS:{entry['name']}:{entry['x']:.2f}:{entry['y']:.2f}:{entry['z']:.2f}:"
 
 
-# ── Ore Detection ───────────────────────────────────────────────────
-
 def detect_all_ore_types(text: str) -> list[str]:
     """
     Detect every ore type mentioned in text, in ORE_ALIASES order.
@@ -621,8 +595,8 @@ def detect_all_ore_types(text: str) -> list[str]:
     found = []
     for ore_key, aliases in ORE_ALIASES.items():
         for alias in aliases:
-            # word-boundary match so short aliases like "u" or "co" don't
-            # false-positive inside unrelated words
+
+
             pattern = r'(?<![a-z0-9])' + re.escape(alias) + r'(?![a-z0-9])'
             if re.search(pattern, text_lower):
                 found.append(ore_key.upper())
@@ -655,8 +629,6 @@ def resolve_ore_key(query: str) -> str | None:
     return None
 
 
-# ── Distance ────────────────────────────────────────────────────────
-
 def distance_3d(x1, y1, z1, x2, y2, z2) -> float:
     return math.sqrt((x2 - x1)**2 + (y2 - y1)**2 + (z2 - z1)**2)
 
@@ -670,10 +642,8 @@ def format_distance(meters: float) -> str:
         return f"{meters:.1f} m"
 
 
-# ── Clustering ──────────────────────────────────────────────────────
-
-CLUSTER_RADIUS = 100_000  # 100km
-DEDUP_RADIUS = 1_500  # 1.5km — same-ore markers this close get merged into one
+CLUSTER_RADIUS = 100_000
+DEDUP_RADIUS = 1_500
 
 def get_cluster_for_position(data: dict, x: float, y: float, z: float) -> dict | None:
     """Find existing cluster within 100km, or return None."""
@@ -722,7 +692,7 @@ def find_cluster_by_name(data: dict, text: str) -> dict | None:
         name = cluster.get("name", "")
         if not name:
             continue
-        # Word-boundary-ish match that still works around hyphens/digits
+
         pattern = r'(?<![A-Za-z0-9])' + re.escape(name.lower()) + r'(?![A-Za-z0-9])'
         if re.search(pattern, text_lower):
             return cluster
@@ -846,9 +816,7 @@ def resolve_cluster(conn, data: dict, raw_name: str, x: float, y: float, z: floa
         _sync_cluster_marker(conn, data, cluster)
         return cluster, False
 
-    # New cluster. Cluster names are UNIQUE in the DB, so if two players
-    # add a brand-new site at the same moment and happen to roll the same
-    # Stargate name, retry with a fresh name instead of failing.
+
     existing_names = {e["name"] for e in data["entries"]}
     existing_cluster_names = {c["name"] for c in data.get("clusters", [])}
     for _ in range(5):
@@ -966,8 +934,6 @@ def merge_into_existing(conn, data: dict, existing: dict, x: float, y: float, z:
     return existing
 
 
-# ── UI Helpers ──────────────────────────────────────────────────────
-
 def clear():
     os.system("cls" if os.name == "nt" else "clear")
 
@@ -1003,8 +969,6 @@ def copy_to_clipboard(text: str):
         print(f"  [!] pyperclip not installed. Copy manually:")
         print(f"      {text}")
 
-
-# ── Add GPS ─────────────────────────────────────────────────────────
 
 LOCATION_TYPES = {"1": "Asteroid", "2": "Planet", "3": "Station"}
 
@@ -1188,8 +1152,7 @@ def _add_gps_inner(conn, data: dict, pasted: str):
     location_type = prompt_location_type()
     is_station = location_type == "Station"
 
-    # Detect ore type(s) — a single deposit can hold more than one
-    # resource. Stations don't have a resource, so skip this entirely.
+
     detected_ores = [] if is_station else detect_all_ore_types(raw_name + " " + description)
 
     if is_station:
@@ -1201,7 +1164,7 @@ def _add_gps_inner(conn, data: dict, pasted: str):
         if split_choice not in ("n", "no"):
             saved = []
             merged = []
-            cluster = None  # resolved lazily, only if a new entry is actually needed
+            cluster = None
 
             for ore in detected_ores:
                 nearby = find_nearby_same_ore(data, ore, x, y, z)
@@ -1255,7 +1218,7 @@ def _add_gps_inner(conn, data: dict, pasted: str):
             input("\n  Press Enter to continue...")
             return
 
-        # Declined the split — fall through as a single entry using one ore
+
         ore_type = detected_ores[0]
         print()
         ore_override = input(f"  Ore type to use (Enter for {ore_type}): ").strip().upper()
@@ -1267,8 +1230,7 @@ def _add_gps_inner(conn, data: dict, pasted: str):
         ore_override = input("  Ore type (or Enter to accept): ").strip().upper()
         ore_type = ore_override if ore_override else auto_ore
 
-    # If a same-ore marker already exists nearby, merge into it instead of
-    # creating a near-duplicate (e.g. two people reporting the same vein).
+
     nearby = find_nearby_same_ore(data, ore_type, x, y, z)
     if nearby:
         dist = distance_3d(x, y, z, nearby["x"], nearby["y"], nearby["z"])
@@ -1279,15 +1241,15 @@ def _add_gps_inner(conn, data: dict, pasted: str):
         input("\n  Press Enter to continue...")
         return
 
-    # Resolve the cluster this point belongs to
+
     cluster, name_has_cluster = resolve_cluster(conn, data, raw_name, x, y, z)
 
-    # Work out a suggested name for the entry itself
+
     if name_has_cluster:
-        # The name already carries the cluster reference — use it as-is
+
         suggested_name = raw_name
     else:
-        # Cluster name goes in front of the ore, e.g. "X3C-395 FE"
+
         suggested_name = f"{cluster['name']} {ore_type}"
 
     print(f"\n  Suggested name: {suggested_name}")
@@ -1313,8 +1275,6 @@ def _add_gps_inner(conn, data: dict, pasted: str):
     copy_to_clipboard(format_se_gps_string(entry))
     input("\n  Press Enter to continue...")
 
-
-# ── Search GPS ──────────────────────────────────────────────────────
 
 def search_gps(data: dict):
     while True:
@@ -1346,7 +1306,7 @@ def search_gps(data: dict):
         if not query:
             return
 
-        # Determine if ore search or name search
+
         ore_key = resolve_ore_key(query)
         is_ore_search = ore_key is not None
         ore_aliases = ORE_ALIASES[ore_key] if ore_key else []
@@ -1358,17 +1318,15 @@ def search_gps(data: dict):
                 if entry_ore == ore_key.upper():
                     matched = True
                 else:
-                    # Fall back to a word-boundary text match (e.g. an
-                    # un-split multi-resource entry that still mentions this
-                    # ore in its name/description) — never a bare substring,
-                    # so "u" (uranium) can't match inside "au" (gold).
+
+
                     hay = f"{entry['name']} {entry.get('description', '')}".lower()
                     matched = any(
                         re.search(r'(?<![a-z0-9])' + re.escape(alias) + r'(?![a-z0-9])', hay)
                         for alias in ore_aliases
                     )
             else:
-                # Name/cluster search
+
                 matched = query.lower() in entry["name"].lower() or query.lower() in entry.get("description", "").lower()
 
             if matched:
@@ -1412,8 +1370,6 @@ def search_gps(data: dict):
             return
 
 
-# ── List All ────────────────────────────────────────────────────────
-
 def list_all(data: dict):
     if not data["entries"]:
         clear()
@@ -1422,7 +1378,7 @@ def list_all(data: dict):
         input("\n  Press Enter to continue...")
         return
 
-    sort_mode = "ore"  # "ore" or "cluster"
+    sort_mode = "ore"
 
     while True:
         clear()
@@ -1471,8 +1427,6 @@ def list_all(data: dict):
             continue
         return
 
-
-# ── Rename ──────────────────────────────────────────────────────────
 
 def _rename_entry_work(conn, entry_id: int, new_name: str):
     with conn.cursor() as cur:
@@ -1760,8 +1714,6 @@ def edit_names(data: dict):
             input("\n  Press Enter to continue...")
 
 
-# ── Where Am I ──────────────────────────────────────────────────────
-
 def where_am_i(data: dict):
     """Paste your current position and find out which cluster (if any)
     you're in or near, plus the nearest cluster if you're outside all
@@ -1834,8 +1786,6 @@ def where_am_i(data: dict):
             return
 
 
-# ── Main Menu ───────────────────────────────────────────────────────
-
 def safe_load_data(previous: dict) -> dict:
     """Refresh data from the DB, but never crash the menu loop — if the
     DB is unreachable, show a clear message and keep showing the last
@@ -1904,8 +1854,6 @@ def main_menu():
         else:
             print("  [!] Invalid choice.")
 
-
-# ── Entry Point ─────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     if "--version" in sys.argv:
