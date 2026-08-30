@@ -4,7 +4,7 @@ A terminal tool for sharing Space Engineers GPS waypoints with your group throug
 one live MySQL database — add a GPS, it's instantly searchable by everyone else
 pointed at the same database.
 
-Current version: **2.4.2** (run `python3 se_gps_navigator.py --version`)
+Current version: **2.4.4** (run `python3 se_gps_navigator.py --version`)
 
 ## Features
 
@@ -12,6 +12,9 @@ Current version: **2.4.2** (run `python3 se_gps_navigator.py --version`)
   passing GPS strings around in Discord.
 - **Paste-to-add** — paste a Space Engineers `GPS:...` string directly, or enter
   coordinates manually.
+- **Uploader attribution** — every uploaded marker records its MySQL login as
+  an `Uploaded by:` note visible in the navigator. The note is not included in
+  copied GPS strings, preserving vanilla Space Engineers compatibility.
 - **Mass paste / batch add** — from the Add GPS screen, type `multi` to paste a
   whole block of `GPS:...` strings at once (one per line, blank line to finish).
   Each one is added automatically — ore detection, multi-resource splitting, and
@@ -39,9 +42,11 @@ Current version: **2.4.2** (run `python3 se_gps_navigator.py --version`)
 - **Location tags** — mark a GPS as an Asteroid, Planet, or Station when adding
   it (stations skip the ore-detection prompts entirely, since they have no
   resource).
-- **Search by ore or by name/cluster**, sorted by distance from a pasted
-  current-position GPS string. Search loops back to "search again?" instead of
-  dropping you back to the main menu.
+- **Multi-ore search and client-side combinations** — search several ore types
+  at once by separating them with commas (for example, `Fe, Si`). When two
+  matching markers are within **1 km**, the navigator offers the closest pair
+  as one client-only combined GPS marker (for example, `FE/SI`) without
+  changing the shared database.
 - **"Where am I"** — paste your current position and find out which cluster
   you're in (or the nearest one, if you're not inside any), with an option to
   copy that cluster's own GPS marker straight to your clipboard.
@@ -51,9 +56,9 @@ Current version: **2.4.2** (run `python3 se_gps_navigator.py --version`)
 - **Rename / delete** entries and clusters after the fact. Renaming a cluster
   offers an auto **re-render** option (`r`) that regenerates its name using the
   current proximity-aware naming convention instead of typing one by hand.
-- **Continuation prompts everywhere** — adding, searching, renaming, and
-  deleting all ask "do another?" when you finish, instead of kicking you back
-  to the main menu each time.
+- **Continuous menus** — adding, searching, renaming, deleting, and location
+  checks automatically return to their next input after an action. Results stay
+  visible above the next prompt, with no extra continuation prompt.
 - **Resilient to DB hiccups** — automatically retries with backoff if the
   database doesn't respond right away or drops mid-operation, instead of
   crashing.
@@ -115,12 +120,15 @@ From the main menu, **[2] Add new GPS** offers two paths:
 
 - **Single entry**: paste one `GPS:...` string (or leave blank for manual
   X/Y/Z entry), pick a location type, confirm the detected ore, and it's
-  saved. After it's saved you're asked "Add another GPS?" so you can keep
-  going without re-opening the menu.
+  saved. Its `Uploaded by:` note uses the configured MySQL username and is
+  visible in the navigator only. After saving, the add screen immediately
+  accepts another GPS without an extra continuation prompt; the prior result remains visible.
+  Type `back` at the GPS prompt to return to the main menu.
 - **Batch / mass paste**: type `multi` at the prompt, then paste as many
   `GPS:...` strings as you want, one per line. A blank line ends the list and
   everything gets added automatically (no per-entry prompts) — good for
-  dumping a big haul at once. Lines that aren't parseable are skipped and
+  dumping a big haul at once. The configured MySQL username is recorded on
+  every marker in the batch. Lines that aren't parseable are skipped and
   listed at the end so nothing silently vanishes.
 
 ## Users & roles
@@ -155,7 +163,7 @@ or crashing.
 The app can check a small JSON manifest for a newer version:
 
 ```json
-{ "version": "2.4.0", "url": "https://raw.githubusercontent.com/<you>/<repo>/main/se_gps_navigator.py" }
+{ "version": "2.4.4", "url": "https://raw.githubusercontent.com/<you>/<repo>/main/se_gps_navigator.py" }
 ```
 
 Host that manifest wherever's convenient (a raw file in this repo works fine)
