@@ -4,7 +4,7 @@ A terminal tool for sharing Space Engineers GPS waypoints with your group throug
 one live MySQL database — add a GPS, it's instantly searchable by everyone else
 pointed at the same database.
 
-Current version: **2.4.4** (run `python3 se_gps_navigator.py --version`)
+Current version: **2.4.5** (run `python3 se_gps_navigator.py --version`)
 
 ## Features
 
@@ -57,8 +57,9 @@ Current version: **2.4.4** (run `python3 se_gps_navigator.py --version`)
   offers an auto **re-render** option (`r`) that regenerates its name using the
   current proximity-aware naming convention instead of typing one by hand.
 - **Continuous menus** — adding, searching, renaming, deleting, and location
-  checks automatically return to their next input after an action. Results stay
-  visible above the next prompt, with no extra continuation prompt.
+  checks automatically return to their next input after an action. The screen
+  clears, redraws the current menu header, and shows the prior action result
+  above the next prompt, with no extra continuation prompt.
 - **Resilient to DB hiccups** — automatically retries with backoff if the
   database doesn't respond right away or drops mid-operation, instead of
   crashing.
@@ -163,7 +164,7 @@ or crashing.
 The app can check a small JSON manifest for a newer version:
 
 ```json
-{ "version": "2.4.4", "url": "https://raw.githubusercontent.com/<you>/<repo>/main/se_gps_navigator.py" }
+{ "version": "2.4.5", "url": "https://raw.githubusercontent.com/<you>/<repo>/main/se_gps_navigator.py" }
 ```
 
 Host that manifest wherever's convenient (a raw file in this repo works fine)
