@@ -4,7 +4,7 @@ A terminal tool for sharing Space Engineers GPS waypoints with your group throug
 one live MySQL database — add a GPS, it's instantly searchable by everyone else
 pointed at the same database.
 
-Current version: **2.4.2** (run `python3 se_gps_navigator.py --version`)
+Current version: **2.4.3** (run `python3 se_gps_navigator.py --version`)
 
 ## Features
 
@@ -12,6 +12,9 @@ Current version: **2.4.2** (run `python3 se_gps_navigator.py --version`)
   passing GPS strings around in Discord.
 - **Paste-to-add** — paste a Space Engineers `GPS:...` string directly, or enter
   coordinates manually.
+- **Uploader attribution** — every uploaded marker records its MySQL login as
+  an `Uploaded by:` note visible in the navigator. The note is not included in
+  copied GPS strings, preserving vanilla Space Engineers compatibility.
 - **Mass paste / batch add** — from the Add GPS screen, type `multi` to paste a
   whole block of `GPS:...` strings at once (one per line, blank line to finish).
   Each one is added automatically — ore detection, multi-resource splitting, and
@@ -115,12 +118,14 @@ From the main menu, **[2] Add new GPS** offers two paths:
 
 - **Single entry**: paste one `GPS:...` string (or leave blank for manual
   X/Y/Z entry), pick a location type, confirm the detected ore, and it's
-  saved. After it's saved you're asked "Add another GPS?" so you can keep
-  going without re-opening the menu.
+  saved. Its `Uploaded by:` note uses the configured MySQL username and is
+  visible in the navigator only. After saving, choose whether to add another
+  GPS without an extra continuation prompt; the prior result remains visible.
 - **Batch / mass paste**: type `multi` at the prompt, then paste as many
   `GPS:...` strings as you want, one per line. A blank line ends the list and
   everything gets added automatically (no per-entry prompts) — good for
-  dumping a big haul at once. Lines that aren't parseable are skipped and
+  dumping a big haul at once. The configured MySQL username is recorded on
+  every marker in the batch. Lines that aren't parseable are skipped and
   listed at the end so nothing silently vanishes.
 
 ## Users & roles
@@ -155,7 +160,7 @@ or crashing.
 The app can check a small JSON manifest for a newer version:
 
 ```json
-{ "version": "2.4.0", "url": "https://raw.githubusercontent.com/<you>/<repo>/main/se_gps_navigator.py" }
+{ "version": "2.4.3", "url": "https://raw.githubusercontent.com/<you>/<repo>/main/se_gps_navigator.py" }
 ```
 
 Host that manifest wherever's convenient (a raw file in this repo works fine)

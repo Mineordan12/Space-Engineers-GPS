@@ -35,7 +35,7 @@ except ImportError:
     sys.exit(1)
 
 
-VERSION = "2.4.2"
+VERSION = "2.4.3"
 
 
 UPDATE_MANIFEST_URL = os.environ.get("SE_GPS_UPDATE_URL", "https://raw.githubusercontent.com/Mineordan12/Space-Engineers-GPS/main/manifest.json")
@@ -580,8 +580,24 @@ def parse_se_gps_string(text: str) -> dict | None:
 
 
 def format_se_gps_string(entry: dict) -> str:
-    """Format entry back to SE GPS string."""
+    """Format an entry as a vanilla-compatible Space Engineers GPS string."""
     return f"GPS:{entry['name']}:{entry['x']:.2f}:{entry['y']:.2f}:{entry['z']:.2f}:"
+
+
+def get_database_username() -> str:
+    """Return the configured MySQL username for GPS uploader attribution."""
+    global _CONFIG
+    if _CONFIG is None:
+        _CONFIG = load_config()
+    return _CONFIG["user"]
+
+
+def add_uploader_to_description(description: str, uploader: str) -> str:
+    """Add a readable uploader attribution to a GPS marker description."""
+    attribution = f"Uploaded by: {uploader}"
+    if attribution in description:
+        return description
+    return f"{description}; {attribution}".strip("; ")
 
 
 def detect_all_ore_types(text: str) -> list[str]:
@@ -984,33 +1000,32 @@ def prompt_location_type() -> str:
 
 
 def add_gps(data: dict):
-    while True:
-        clear()
-        print_header("ADD NEW GPS")
+    clear()
+    print_header("ADD NEW GPS")
 
+    while True:
         print("Paste a Space Engineers GPS string, or enter coordinates manually.")
         print("SE GPS format: GPS:Name:X:Y:Z:#FFFFFF:Description:")
         print("Leave blank for manual entry.")
         print("Type 'multi' to paste several GPS strings at once (one per line).\n")
 
         pasted = input("> ").strip()
+        uploader = get_database_username()
 
         if pasted.lower() == "multi":
-            _add_gps_batch(data)
+            _add_gps_batch(data, uploader)
         else:
             try:
                 conn = get_connection()
             except DatabaseUnavailable as e:
                 print(f"\n  [!] {e}")
-                input("\n  Press Enter to continue...")
             else:
                 try:
-                    _add_gps_inner(conn, data, pasted)
+                    _add_gps_inner(conn, data, pasted, uploader)
                 except (pymysql.err.OperationalError, pymysql.err.InterfaceError, DatabaseUnavailable) as e:
                     print(f"\n  [!] Lost connection to the database while adding this GPS: {e}")
                     print("  [i] Part of this action may have already been saved — check 'List all entries'")
                     print("      before adding it again.")
-                    input("\n  Press Enter to continue...")
                 finally:
                     try:
                         conn.close()
@@ -1022,7 +1037,7 @@ def add_gps(data: dict):
             return
 
 
-def _add_gps_batch(data: dict):
+def _add_gps_batch(data: dict, uploader: str):
     """
     Mass-paste mode: read GPS strings one per line until a blank line,
     then add each one automatically (auto ore detection, auto
@@ -1039,14 +1054,12 @@ def _add_gps_batch(data: dict):
 
     if not lines:
         print("  [!] No GPS strings entered.")
-        input("\n  Press Enter to continue...")
         return
 
     try:
         conn = get_connection()
     except DatabaseUnavailable as e:
         print(f"\n  [!] {e}")
-        input("\n  Press Enter to continue...")
         return
 
     added = []
@@ -1062,7 +1075,7 @@ def _add_gps_batch(data: dict):
 
             x, y, z = parsed["x"], parsed["y"], parsed["z"]
             raw_name = parsed["name"]
-            description = parsed["description"]
+            description = add_uploader_to_description(parsed["description"], uploader)
 
             detected_ores = detect_all_ore_types(raw_name + " " + description)
             ores_to_process = detected_ores if detected_ores else ["Unknown"]
@@ -1107,7 +1120,6 @@ def _add_gps_batch(data: dict):
             conn.close()
         except Exception:
             pass
-        input("\n  Press Enter to continue...")
         return
     finally:
         try:
@@ -1122,17 +1134,16 @@ def _add_gps_batch(data: dict):
         print(f"  [!] Skipped {len(skipped)} line(s) that weren't valid GPS strings:")
         for s in skipped:
             print(f"      {s}")
-    input("\n  Press Enter to continue...")
 
 
-def _add_gps_inner(conn, data: dict, pasted: str):
+def _add_gps_inner(conn, data: dict, pasted: str, uploader: str):
     if pasted:
         parsed = parse_se_gps_string(pasted)
         if parsed:
             print(f"\n  Parsed: {parsed['name']} @ {parsed['x']:.2f}, {parsed['y']:.2f}, {parsed['z']:.2f}")
             x, y, z = parsed["x"], parsed["y"], parsed["z"]
             raw_name = parsed["name"]
-            description = parsed["description"]
+            description = add_uploader_to_description(parsed["description"], uploader)
         else:
             print("  [!] Could not parse GPS string. Switching to manual entry.\n")
             coords = input_coords()
@@ -1140,14 +1151,14 @@ def _add_gps_inner(conn, data: dict, pasted: str):
                 return
             x, y, z = coords
             raw_name = ""
-            description = ""
+            description = add_uploader_to_description("", uploader)
     else:
         coords = input_coords()
         if coords is None:
             return
         x, y, z = coords
         raw_name = ""
-        description = ""
+        description = add_uploader_to_description("", uploader)
 
     location_type = prompt_location_type()
     is_station = location_type == "Station"
@@ -1215,7 +1226,6 @@ def _add_gps_inner(conn, data: dict, pasted: str):
                     for s in gps_strings:
                         print(f"      {s}")
 
-            input("\n  Press Enter to continue...")
             return
 
 
@@ -1238,7 +1248,6 @@ def _add_gps_inner(conn, data: dict, pasted: str):
         updated = merge_into_existing(conn, data, nearby, x, y, z, description)
         print(f"  [✓] Updated: {updated['name']} ({updated['ore_type']}) @ {updated['x']:.2f}, {updated['y']:.2f}, {updated['z']:.2f}  (reports: {updated['report_count']})")
         copy_to_clipboard(format_se_gps_string(updated))
-        input("\n  Press Enter to continue...")
         return
 
 
@@ -1273,7 +1282,6 @@ def _add_gps_inner(conn, data: dict, pasted: str):
 
     print(f"\n  [✓] Saved: {final_name} ({ore_type}) @ {x:.2f}, {y:.2f}, {z:.2f}")
     copy_to_clipboard(format_se_gps_string(entry))
-    input("\n  Press Enter to continue...")
 
 
 def search_gps(data: dict):
