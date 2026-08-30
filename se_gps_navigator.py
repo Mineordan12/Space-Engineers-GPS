@@ -15,6 +15,7 @@ import random
 import re
 import sys
 import time
+from itertools import product
 import urllib.error
 import urllib.request
 from datetime import datetime
@@ -35,7 +36,7 @@ except ImportError:
     sys.exit(1)
 
 
-VERSION = "2.4.2"
+VERSION = "2.4.6"
 
 
 UPDATE_MANIFEST_URL = os.environ.get("SE_GPS_UPDATE_URL", "https://raw.githubusercontent.com/Mineordan12/Space-Engineers-GPS/main/manifest.json")
@@ -548,7 +549,7 @@ def generate_stargate_name(existing_names: set, data: dict = None, x: float = No
 def parse_se_gps_string(text: str) -> dict | None:
     """
     Parse a Space Engineers GPS string.
-    Format: GPS:Name:X:Y:Z:#FFFFFF:Description:
+    Format: GPS:Name:X:Y:Z:
     """
     text = text.strip()
     if not text.startswith("GPS:"):
@@ -580,8 +581,24 @@ def parse_se_gps_string(text: str) -> dict | None:
 
 
 def format_se_gps_string(entry: dict) -> str:
-    """Format entry back to SE GPS string."""
+    """Format an entry as a vanilla-compatible Space Engineers GPS string."""
     return f"GPS:{entry['name']}:{entry['x']:.2f}:{entry['y']:.2f}:{entry['z']:.2f}:"
+
+
+def get_database_username() -> str:
+    """Return the configured MySQL username for GPS uploader attribution."""
+    global _CONFIG
+    if _CONFIG is None:
+        _CONFIG = load_config()
+    return _CONFIG["user"]
+
+
+def add_uploader_to_description(description: str, uploader: str) -> str:
+    """Add a readable uploader attribution to a GPS marker description."""
+    attribution = f"Uploaded by: {uploader}"
+    if attribution in description:
+        return description
+    return f"{description}; {attribution}".strip("; ")
 
 
 def detect_all_ore_types(text: str) -> list[str]:
@@ -964,10 +981,19 @@ def input_coords(prompt: str = "Enter coordinates") -> tuple[float, float, float
 def copy_to_clipboard(text: str):
     if CLIPBOARD_AVAILABLE:
         pyperclip.copy(text)
-        print(f"  [✓] Copied to clipboard: {text}")
+        message = f"  [✓] Copied to clipboard: {text}"
     else:
-        print(f"  [!] pyperclip not installed. Copy manually:")
-        print(f"      {text}")
+        message = f"  [!] pyperclip not installed. Copy manually:\n      {text}"
+    print(message)
+    return message
+
+
+def show_menu(title: str, previous_output: str = ""):
+    """Clear a menu while retaining the previous action result beneath its header."""
+    clear()
+    print_header(title)
+    if previous_output:
+        print(previous_output)
 
 
 LOCATION_TYPES = {"1": "Asteroid", "2": "Planet", "3": "Station"}
@@ -984,45 +1010,44 @@ def prompt_location_type() -> str:
 
 
 def add_gps(data: dict):
+    previous_output = ""
     while True:
-        clear()
-        print_header("ADD NEW GPS")
-
+        show_menu("ADD NEW GPS", previous_output)
+        previous_output = ""
         print("Paste a Space Engineers GPS string, or enter coordinates manually.")
-        print("SE GPS format: GPS:Name:X:Y:Z:#FFFFFF:Description:")
+        print("SE GPS format: GPS:Name:X:Y:Z:")
         print("Leave blank for manual entry.")
-        print("Type 'multi' to paste several GPS strings at once (one per line).\n")
+        print("Type 'multi' to paste several GPS strings at once (one per line).")
+        print("Type 'back' to return to the main menu.\n")
 
         pasted = input("> ").strip()
+        if pasted.lower() == "back":
+            return
+        uploader = get_database_username()
 
         if pasted.lower() == "multi":
-            _add_gps_batch(data)
+            previous_output = _add_gps_batch(data, uploader)
         else:
             try:
                 conn = get_connection()
             except DatabaseUnavailable as e:
                 print(f"\n  [!] {e}")
-                input("\n  Press Enter to continue...")
+                previous_output = f"  [!] {e}"
             else:
                 try:
-                    _add_gps_inner(conn, data, pasted)
+                    previous_output = _add_gps_inner(conn, data, pasted, uploader)
                 except (pymysql.err.OperationalError, pymysql.err.InterfaceError, DatabaseUnavailable) as e:
                     print(f"\n  [!] Lost connection to the database while adding this GPS: {e}")
                     print("  [i] Part of this action may have already been saved — check 'List all entries'")
                     print("      before adding it again.")
-                    input("\n  Press Enter to continue...")
+                    previous_output = f"  [!] Lost connection to the database while adding this GPS: {e}"
                 finally:
                     try:
                         conn.close()
                     except Exception:
                         pass
 
-        again = input("\n  Add another GPS? (Y/n): ").strip().lower()
-        if again in ("n", "no"):
-            return
-
-
-def _add_gps_batch(data: dict):
+def _add_gps_batch(data: dict, uploader: str) -> str:
     """
     Mass-paste mode: read GPS strings one per line until a blank line,
     then add each one automatically (auto ore detection, auto
@@ -1039,15 +1064,13 @@ def _add_gps_batch(data: dict):
 
     if not lines:
         print("  [!] No GPS strings entered.")
-        input("\n  Press Enter to continue...")
-        return
+        return "  [!] No GPS strings entered."
 
     try:
         conn = get_connection()
     except DatabaseUnavailable as e:
         print(f"\n  [!] {e}")
-        input("\n  Press Enter to continue...")
-        return
+        return f"  [!] {e}"
 
     added = []
     merged = []
@@ -1062,7 +1085,7 @@ def _add_gps_batch(data: dict):
 
             x, y, z = parsed["x"], parsed["y"], parsed["z"]
             raw_name = parsed["name"]
-            description = parsed["description"]
+            description = add_uploader_to_description(parsed["description"], uploader)
 
             detected_ores = detect_all_ore_types(raw_name + " " + description)
             ores_to_process = detected_ores if detected_ores else ["Unknown"]
@@ -1107,8 +1130,7 @@ def _add_gps_batch(data: dict):
             conn.close()
         except Exception:
             pass
-        input("\n  Press Enter to continue...")
-        return
+        return f"  [!] Lost connection to the database mid-batch: {e}"
     finally:
         try:
             conn.close()
@@ -1122,32 +1144,32 @@ def _add_gps_batch(data: dict):
         print(f"  [!] Skipped {len(skipped)} line(s) that weren't valid GPS strings:")
         for s in skipped:
             print(f"      {s}")
-    input("\n  Press Enter to continue...")
+    return f"  [✓] Added {len(added)} new GPS signal(s)."
 
 
-def _add_gps_inner(conn, data: dict, pasted: str):
+def _add_gps_inner(conn, data: dict, pasted: str, uploader: str) -> str:
     if pasted:
         parsed = parse_se_gps_string(pasted)
         if parsed:
             print(f"\n  Parsed: {parsed['name']} @ {parsed['x']:.2f}, {parsed['y']:.2f}, {parsed['z']:.2f}")
             x, y, z = parsed["x"], parsed["y"], parsed["z"]
             raw_name = parsed["name"]
-            description = parsed["description"]
+            description = add_uploader_to_description(parsed["description"], uploader)
         else:
             print("  [!] Could not parse GPS string. Switching to manual entry.\n")
             coords = input_coords()
             if coords is None:
-                return
+                return ""
             x, y, z = coords
             raw_name = ""
-            description = ""
+            description = add_uploader_to_description("", uploader)
     else:
         coords = input_coords()
         if coords is None:
-            return
+            return ""
         x, y, z = coords
         raw_name = ""
-        description = ""
+        description = add_uploader_to_description("", uploader)
 
     location_type = prompt_location_type()
     is_station = location_type == "Station"
@@ -1215,8 +1237,7 @@ def _add_gps_inner(conn, data: dict, pasted: str):
                     for s in gps_strings:
                         print(f"      {s}")
 
-            input("\n  Press Enter to continue...")
-            return
+            return f"  [✓] Saved {len(saved)} new GPS signal(s)."
 
 
         ore_type = detected_ores[0]
@@ -1237,9 +1258,12 @@ def _add_gps_inner(conn, data: dict, pasted: str):
         print(f"\n  [i] Existing {ore_type} marker '{nearby['name']}' is {format_distance(dist)} away — merging instead of duplicating.")
         updated = merge_into_existing(conn, data, nearby, x, y, z, description)
         print(f"  [✓] Updated: {updated['name']} ({updated['ore_type']}) @ {updated['x']:.2f}, {updated['y']:.2f}, {updated['z']:.2f}  (reports: {updated['report_count']})")
-        copy_to_clipboard(format_se_gps_string(updated))
-        input("\n  Press Enter to continue...")
-        return
+        clipboard_message = copy_to_clipboard(format_se_gps_string(updated))
+        return (
+            f"  [i] Existing {ore_type} marker '{nearby['name']}' is {format_distance(dist)} away — merging instead of duplicating.\n"
+            f"  [✓] Updated: {updated['name']} ({updated['ore_type']}) @ {updated['x']:.2f}, {updated['y']:.2f}, {updated['z']:.2f}  (reports: {updated['report_count']})\n"
+            f"{clipboard_message}"
+        )
 
 
     cluster, name_has_cluster = resolve_cluster(conn, data, raw_name, x, y, z)
@@ -1272,14 +1296,102 @@ def _add_gps_inner(conn, data: dict, pasted: str):
     data["entries"].append(entry)
 
     print(f"\n  [✓] Saved: {final_name} ({ore_type}) @ {x:.2f}, {y:.2f}, {z:.2f}")
-    copy_to_clipboard(format_se_gps_string(entry))
-    input("\n  Press Enter to continue...")
+    clipboard_message = copy_to_clipboard(format_se_gps_string(entry))
+    return f"  [✓] Saved: {final_name} ({ore_type}) @ {x:.2f}, {y:.2f}, {z:.2f}\n{clipboard_message}"
+
+
+def _search_matches(entries: list[dict], ore_key: str, query: str, cx: float, cy: float, cz: float) -> list[dict]:
+    """Return distance-ranked entries matching one ore key or text query."""
+    matches = []
+    ore_aliases = ORE_ALIASES.get(ore_key.lower(), []) if ore_key else []
+    for entry in entries:
+        if ore_key:
+            entry_ore = entry.get("ore_type", "Unknown").upper()
+            matched = entry_ore == ore_key.upper()
+            if not matched:
+                hay = f"{entry['name']} {entry.get('description', '')}".lower()
+                matched = any(re.search(r'(?<![a-z0-9])' + re.escape(alias) + r'(?![a-z0-9])', hay) for alias in ore_aliases)
+        else:
+            matched = query.lower() in entry["name"].lower() or query.lower() in entry.get("description", "").lower()
+        if matched:
+            matches.append({"entry": entry, "distance": distance_3d(cx, cy, cz, entry["x"], entry["y"], entry["z"])})
+    return sorted(matches, key=lambda match: match["distance"])
+
+
+def find_combined_search_marker(searches: list[tuple[str, list[dict]]], cx: float, cy: float, cz: float) -> dict | None:
+    """Build the closest client-only marker from two different ore searches within 1 km."""
+    best = None
+    for left_index, (left_ore, left_matches) in enumerate(searches):
+        for right_ore, right_matches in searches[left_index + 1:]:
+            for left in left_matches:
+                for right in right_matches:
+                    first, second = left["entry"], right["entry"]
+                    pair_distance = distance_3d(first["x"], first["y"], first["z"], second["x"], second["y"], second["z"])
+                    if pair_distance > 1_000:
+                        continue
+                    x = (first["x"] + second["x"]) / 2
+                    y = (first["y"] + second["y"]) / 2
+                    z = (first["z"] + second["z"]) / 2
+                    distance_from_user = distance_3d(cx, cy, cz, x, y, z)
+                    candidate = {
+                        "name": f"{left_ore.upper()}/{right_ore.upper()}",
+                        "x": x, "y": y, "z": z,
+                        "ore_type": f"{left_ore.upper()}/{right_ore.upper()}",
+                        "source_entries": (first, second),
+                        "pair_distance": pair_distance,
+                        "distance": distance_from_user,
+                    }
+                    score = (distance_from_user, pair_distance)
+                    if best is None or score < best[0]:
+                        best = (score, candidate)
+    return best[1] if best else None
+
+
+def extract_ore_searches(query: str) -> list[str]:
+    """Find distinct ore types mentioned anywhere in a search query."""
+    found = []
+    for token in re.findall(r"[A-Za-z]+", query):
+        ore_key = resolve_ore_key(token)
+        if ore_key and ore_key not in found:
+            found.append(ore_key)
+    return found
+
+
+def select_multi_ore_matches(search_results: list[tuple[str, list[dict]]], cx: float, cy: float, cz: float) -> list[dict]:
+    """Pick one nearby result per requested ore, preferring one shared cluster."""
+    candidates = [(ore, matches[:10]) for ore, matches in search_results]
+    if any(not matches for _, matches in candidates):
+        return []
+
+    common_cluster_ids = set.intersection(*[
+        {match["entry"].get("cluster_id") for match in matches if match["entry"].get("cluster_id") is not None}
+        for _, matches in candidates
+    ])
+    if common_cluster_ids:
+        candidates = [
+            (ore, [match for match in matches if match["entry"].get("cluster_id") in common_cluster_ids])
+            for ore, matches in candidates
+        ]
+
+    best = None
+    for selection in product(*(matches for _, matches in candidates)):
+        entries = [match["entry"] for match in selection]
+        pair_distance = sum(
+            distance_3d(left["x"], left["y"], left["z"], right["x"], right["y"], right["z"])
+            for index, left in enumerate(entries) for right in entries[index + 1:]
+        )
+        user_distance = sum(match["distance"] for match in selection)
+        score = (pair_distance, user_distance)
+        if best is None or score < best[0]:
+            best = (score, list(selection))
+    return best[1] if best else []
 
 
 def search_gps(data: dict):
+    previous_output = ""
     while True:
-        clear()
-        print_header("SEARCH GPS")
+        show_menu("SEARCH GPS", previous_output)
+        previous_output = ""
 
         if not data["entries"]:
             print("  No GPS entries in database yet.")
@@ -1288,62 +1400,53 @@ def search_gps(data: dict):
             return
 
         print("Paste your current position as a Space Engineers GPS string.")
-        print("SE GPS format: GPS:Name:X:Y:Z:#FFFFFF:Description:\n")
+        print("SE GPS format: GPS:Name:X:Y:Z:\n")
         pasted = input("> ").strip()
         if not pasted:
             return
         current = parse_se_gps_string(pasted)
         if not current:
             print("\n  [!] Could not parse that GPS string.")
-            input("\n  Press Enter to continue...")
+            previous_output = "  [!] Could not parse that GPS string."
             continue
         cx, cy, cz = current["x"], current["y"], current["z"]
         print(f"\n  Current position: {cx:.2f}, {cy:.2f}, {cz:.2f}")
 
         print("\nSearch by ore type (Fe, Ni, Co, Si, Mg, Ag, Au, Pt, U, Ice)")
         print("or by name/cluster (e.g., 'P3X', 'Velnor').")
+        print("Name multiple ore types naturally (e.g., 'Fe Si' or 'gold and silver').")
         query = input("\nWhat are you looking for? ").strip()
         if not query:
             return
 
+        ore_keys = extract_ore_searches(query)
+        multi_ore_search = len(ore_keys) > 1
+        if multi_ore_search:
+            search_results = [(ore_key, _search_matches(data["entries"], ore_key, ore_key, cx, cy, cz)) for ore_key in ore_keys]
+            primary_matches = select_multi_ore_matches(search_results, cx, cy, cz)
+            primary_ids = {match["entry"].get("id") for match in primary_matches}
+            remaining_matches = [match for _, results in search_results for match in results if match["entry"].get("id") not in primary_ids]
+            matches = primary_matches + sorted(remaining_matches, key=lambda match: match["distance"])
+            combined_marker = find_combined_search_marker([(ore, primary_matches[index:index + 1]) for index, (ore, _) in enumerate(search_results) if index < len(primary_matches)], cx, cy, cz)
+        else:
+            ore_key = ore_keys[0] if ore_keys else resolve_ore_key(query)
+            matches = _search_matches(data["entries"], ore_key, query, cx, cy, cz)
+            combined_marker = None
 
-        ore_key = resolve_ore_key(query)
-        is_ore_search = ore_key is not None
-        ore_aliases = ORE_ALIASES[ore_key] if ore_key else []
-
-        matches = []
-        for entry in data["entries"]:
-            if is_ore_search:
-                entry_ore = entry.get("ore_type", "Unknown").upper()
-                if entry_ore == ore_key.upper():
-                    matched = True
-                else:
-
-
-                    hay = f"{entry['name']} {entry.get('description', '')}".lower()
-                    matched = any(
-                        re.search(r'(?<![a-z0-9])' + re.escape(alias) + r'(?![a-z0-9])', hay)
-                        for alias in ore_aliases
-                    )
-            else:
-
-                matched = query.lower() in entry["name"].lower() or query.lower() in entry.get("description", "").lower()
-
-            if matched:
-                dist = distance_3d(cx, cy, cz, entry["x"], entry["y"], entry["z"])
-                matches.append({"entry": entry, "distance": dist})
-
-        matches.sort(key=lambda m: m["distance"])
-
-        clear()
-        print_header(f"SEARCH RESULTS: {query.upper()}")
+        print(f"\n  SEARCH RESULTS: {query.upper()}")
         print(f"  From position: {cx:.2f}, {cy:.2f}, {cz:.2f}")
         print(f"  Found {len(matches)} match(es)\n")
 
         if not matches:
             print("  No matches found.")
-            input("\n  Press Enter to continue...")
+            previous_output = f"  SEARCH RESULTS: {query.upper()}\n  No matches found."
         else:
+            if combined_marker:
+                gps_str = format_se_gps_string(combined_marker)
+                print("  [✓] Closest combined marker (client-only; database unchanged)")
+                print(f"       {combined_marker['name']}  |  {format_distance(combined_marker['distance'])} from you")
+                print(f"       Combined from markers {format_distance(combined_marker['pair_distance'])} apart")
+                print(f"       GPS:    {gps_str}\n")
             for i, m in enumerate(matches[:10], 1):
                 e = m["entry"]
                 gps_str = format_se_gps_string(e)
@@ -1356,18 +1459,17 @@ def search_gps(data: dict):
                     print(f"       Note:   {e['description'][:50]}")
                 print()
 
-            nearest = matches[0]["entry"]
+            nearest = combined_marker or matches[0]["entry"]
             gps_str = format_se_gps_string(nearest)
             print("-" * 60)
-            copy_choice = input("  Copy nearest GPS to clipboard? (y/n): ").strip().lower()
-            if copy_choice in ("y", "yes"):
-                copy_to_clipboard(gps_str)
-
-            input("\n  Press Enter to continue...")
-
-        again = input("\n  Search again? (Y/n): ").strip().lower()
-        if again in ("n", "no"):
-            return
+            choice = input("  [#] Copy a listed GPS   [c] Copy combined GPS   [Enter] New search: ").strip().lower()
+            if choice.isdigit() and 1 <= int(choice) <= len(matches[:10]):
+                clipboard_message = copy_to_clipboard(format_se_gps_string(matches[int(choice) - 1]["entry"]))
+                previous_output = f"  SEARCH RESULTS: {query.upper()}\n{clipboard_message}"
+            elif choice == "c" and combined_marker:
+                previous_output = f"  SEARCH RESULTS: {query.upper()}\n{copy_to_clipboard(gps_str)}"
+            else:
+                previous_output = f"  SEARCH RESULTS: {query.upper()}"
 
 
 def list_all(data: dict):
@@ -1379,10 +1481,10 @@ def list_all(data: dict):
         return
 
     sort_mode = "ore"
+    clear()
+    print_header("ALL GPS ENTRIES")
 
     while True:
-        clear()
-        print_header("ALL GPS ENTRIES")
         mode_label = "Ore Type" if sort_mode == "ore" else "Cluster"
         print(f"  Sorted by: {mode_label}\n")
 
@@ -1399,7 +1501,7 @@ def list_all(data: dict):
 
         numbered = []
         for key in sorted(groups.keys()):
-            entries = groups[key]
+            entries = sorted(groups[key], key=lambda entry: entry.get("ore_type") != "CLUSTER")
             print(f"\n  [{key}] — {len(entries)} entr{'y' if len(entries) == 1 else 'ies'}")
             for e in entries:
                 numbered.append(e)
@@ -1423,7 +1525,6 @@ def list_all(data: dict):
                 copy_to_clipboard(format_se_gps_string(e))
             else:
                 print("  [!] Invalid number.")
-            input("\n  Press Enter to continue...")
             continue
         return
 
@@ -1435,16 +1536,16 @@ def _rename_entry_work(conn, entry_id: int, new_name: str):
 
 
 def rename_entry(data: dict):
+    previous_output = ""
     while True:
-        clear()
-        print_header("RENAME GPS ENTRY")
-
-        if not data["entries"]:
+        show_menu("RENAME GPS ENTRY", previous_output)
+        previous_output = ""
+        editable_entries = [entry for entry in data["entries"] if entry.get("ore_type") != "CLUSTER"]
+        if not editable_entries:
             print("  No GPS entries yet.")
-            input("\n  Press Enter to continue...")
             return
 
-        for i, e in enumerate(data["entries"], 1):
+        for i, e in enumerate(editable_entries, 1):
             print(f"  [{i:>3}] {e['name']}  ({e.get('ore_type', 'Unknown')})  @ {e['x']:.2f}, {e['y']:.2f}, {e['z']:.2f}")
 
         choice = input("\n  Entry number to rename (or Enter to go back): ").strip()
@@ -1454,32 +1555,29 @@ def rename_entry(data: dict):
             idx = int(choice) - 1
             if idx < 0:
                 raise IndexError
-            entry = data["entries"][idx]
+            entry = editable_entries[idx]
         except (ValueError, IndexError):
             print("  [!] Invalid entry number.")
-            input("\n  Press Enter to continue...")
+            previous_output = "  [!] Invalid entry number."
             continue
 
         old_name = entry["name"]
         new_name = input(f"  New name for '{old_name}': ").strip()
         if not new_name:
             print("  [!] Name cannot be empty. Cancelled.")
-            input("\n  Press Enter to continue...")
+            previous_output = "  [!] Name cannot be empty. Cancelled."
             continue
 
         try:
             run_db(_rename_entry_work, entry["id"], new_name)
         except DatabaseUnavailable as e:
             print(f"\n  [!] Could not save the rename: {e}")
-            input("\n  Press Enter to continue...")
+            previous_output = f"  [!] Could not save the rename: {e}"
             continue
 
         entry["name"] = new_name
         print(f"\n  [✓] Renamed '{old_name}' -> '{new_name}'")
-
-        again = input("\n  Rename another entry? (Y/n): ").strip().lower()
-        if again in ("n", "no"):
-            return
+        previous_output = f"  [✓] Renamed '{old_name}' -> '{new_name}'"
 
 
 def _regenerate_name_for_cluster(data: dict, cluster: dict) -> str:
@@ -1522,18 +1620,19 @@ def _rename_cluster_work(conn, data: dict, cluster_id: int, new_name: str, casca
 
 
 def rename_cluster(data: dict):
+    previous_output = ""
     while True:
-        clear()
-        print_header("RENAME CLUSTER")
-
+        show_menu("RENAME CLUSTER", previous_output)
+        previous_output = ""
         clusters = data.get("clusters", [])
         if not clusters:
             print("  No clusters yet.")
-            input("\n  Press Enter to continue...")
             return
 
         for i, c in enumerate(clusters, 1):
-            print(f"  [{i:>3}] {c['name']}  ({len(c.get('entries', []))} point(s))")
+            marker = next((entry for entry in data["entries"] if entry.get("id") == c.get("marker_entry_id")), None)
+            marker_text = f"  GPS: {marker['x']:.2f}, {marker['y']:.2f}, {marker['z']:.2f}" if marker else ""
+            print(f"  [{i:>3}] {c['name']}  ({len(c.get('entries', []))} point(s)){marker_text}")
 
         choice = input("\n  Cluster number to rename (or Enter to go back): ").strip()
         if not choice:
@@ -1545,14 +1644,14 @@ def rename_cluster(data: dict):
             cluster = clusters[idx]
         except (ValueError, IndexError):
             print("  [!] Invalid cluster number.")
-            input("\n  Press Enter to continue...")
+            previous_output = "  [!] Invalid cluster number."
             continue
 
         old_name = cluster["name"]
         raw = input(f"  New name for '{old_name}' (or 'r' to auto re-render it): ").strip()
         if not raw:
             print("  [!] Name cannot be empty. Cancelled.")
-            input("\n  Press Enter to continue...")
+            previous_output = "  [!] Name cannot be empty. Cancelled."
             continue
 
         if raw.lower() == "r":
@@ -1568,16 +1667,13 @@ def rename_cluster(data: dict):
             updated = run_db(_rename_cluster_work, data, cluster["id"], new_name, cascade)
         except DatabaseUnavailable as e:
             print(f"\n  [!] Could not save the rename: {e}")
-            input("\n  Press Enter to continue...")
+            previous_output = f"  [!] Could not save the rename: {e}"
             continue
 
         cluster["name"] = new_name
         suffix = f", updated {updated} entr{'y' if updated == 1 else 'ies'}" if updated else ""
         print(f"\n  [✓] Renamed cluster '{old_name}' -> '{new_name}'{suffix}")
-
-        again = input("\n  Rename another cluster? (Y/n): ").strip().lower()
-        if again in ("n", "no"):
-            return
+        previous_output = f"  [✓] Renamed cluster '{old_name}' -> '{new_name}'{suffix}"
 
 
 def _remove_cluster_point(conn, data: dict, cluster: dict, x: float, y: float, z: float) -> bool:
@@ -1643,16 +1739,16 @@ def _delete_entry_work(conn, data: dict, entry: dict):
 
 
 def delete_entry(data: dict):
+    previous_output = ""
     while True:
-        clear()
-        print_header("DELETE GPS ENTRY")
-
-        if not data["entries"]:
+        show_menu("DELETE GPS ENTRY", previous_output)
+        previous_output = ""
+        deletable_entries = [entry for entry in data["entries"] if entry.get("ore_type") != "CLUSTER"]
+        if not deletable_entries:
             print("  No GPS entries yet.")
-            input("\n  Press Enter to continue...")
             return
 
-        for i, e in enumerate(data["entries"], 1):
+        for i, e in enumerate(deletable_entries, 1):
             confirmed = f"  ({e['report_count']}x confirmed)" if e.get("report_count", 1) > 1 else ""
             tag = f"  [{e['location_type']}]" if e.get("location_type") else ""
             print(f"  [{i:>3}] {e['name']}  ({e.get('ore_type', 'Unknown')})  @ {e['x']:.2f}, {e['y']:.2f}, {e['z']:.2f}{tag}{confirmed}")
@@ -1664,36 +1760,32 @@ def delete_entry(data: dict):
             idx = int(choice) - 1
             if idx < 0:
                 raise IndexError
-            entry = data["entries"][idx]
+            entry = deletable_entries[idx]
         except (ValueError, IndexError):
             print("  [!] Invalid entry number.")
-            input("\n  Press Enter to continue...")
+            previous_output = "  [!] Invalid entry number."
             continue
 
         confirm = input(f"  Type 'yes' to permanently delete '{entry['name']}': ").strip().lower()
         if confirm != "yes":
             print("  Cancelled.")
-            input("\n  Press Enter to continue...")
+            previous_output = "  Cancelled."
             continue
 
         try:
             run_db(_delete_entry_work, data, entry)
         except DatabaseUnavailable as e:
             print(f"\n  [!] Could not delete: {e}")
-            input("\n  Press Enter to continue...")
+            previous_output = f"  [!] Could not delete: {e}"
             continue
 
         print(f"\n  [✓] Deleted '{entry['name']}'.")
-
-        again = input("\n  Delete another entry? (Y/n): ").strip().lower()
-        if again in ("n", "no"):
-            return
+        previous_output = f"  [✓] Deleted '{entry['name']}'."
 
 
 def edit_names(data: dict):
     while True:
-        clear()
-        print_header("EDIT / DELETE")
+        show_menu("EDIT / DELETE")
         print("  [1] Rename a GPS entry")
         print("  [2] Rename a cluster (or auto re-render its name)")
         print("  [3] Delete a GPS entry")
@@ -1711,32 +1803,31 @@ def edit_names(data: dict):
             return
         else:
             print("  [!] Invalid choice.")
-            input("\n  Press Enter to continue...")
 
 
 def where_am_i(data: dict):
     """Paste your current position and find out which cluster (if any)
     you're in or near, plus the nearest cluster if you're outside all
     of them. Offers to copy that cluster's own GPS marker."""
+    previous_output = ""
     while True:
-        clear()
-        print_header("WHERE AM I")
+        show_menu("WHERE AM I", previous_output)
+        previous_output = ""
 
         clusters = data.get("clusters", [])
         if not clusters:
             print("  No clusters recorded yet.")
-            input("\n  Press Enter to continue...")
             return
 
         print("Paste your current position as a Space Engineers GPS string.")
-        print("SE GPS format: GPS:Name:X:Y:Z:#FFFFFF:Description:\n")
+        print("SE GPS format: GPS:Name:X:Y:Z:\n")
         pasted = input("> ").strip()
         if not pasted:
             return
         current = parse_se_gps_string(pasted)
         if not current:
             print("\n  [!] Could not parse that GPS string.")
-            input("\n  Press Enter to continue...")
+            previous_output = "  [!] Could not parse that GPS string."
             continue
         cx, cy, cz = current["x"], current["y"], current["z"]
 
@@ -1746,9 +1837,7 @@ def where_am_i(data: dict):
             ranked.append((dist, cluster))
         ranked.sort(key=lambda t: t[0])
 
-        clear()
-        print_header("WHERE AM I")
-        print(f"  Position: {cx:.2f}, {cy:.2f}, {cz:.2f}\n")
+        print(f"\n  Position: {cx:.2f}, {cy:.2f}, {cz:.2f}\n")
 
         nearest_dist, nearest_cluster = ranked[0]
         entry_count = len(nearest_cluster.get("entries", []))
@@ -1779,11 +1868,9 @@ def where_am_i(data: dict):
 
         copy_choice = input(f"\n  Copy '{nearest_cluster['name']}' cluster GPS to clipboard? (y/n): ").strip().lower()
         if copy_choice in ("y", "yes"):
-            copy_to_clipboard(gps_str)
-
-        again = input("\n  Check another position? (Y/n): ").strip().lower()
-        if again in ("n", "no"):
-            return
+            previous_output = copy_to_clipboard(gps_str)
+        else:
+            previous_output = f"  [i] Nearest cluster: {nearest_cluster['name']} ({format_distance(nearest_dist)} away)."
 
 
 def safe_load_data(previous: dict) -> dict:
