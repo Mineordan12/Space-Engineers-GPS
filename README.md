@@ -4,7 +4,7 @@ A terminal tool for sharing Space Engineers GPS waypoints with your group throug
 one live MySQL database — add a GPS, it's instantly searchable by everyone else
 pointed at the same database.
 
-Current version: **2.4.5** (run `python3 se_gps_navigator.py --version`)
+Current version: **2.4.6** (run `python3 se_gps_navigator.py --version`)
 
 ## Features
 
@@ -42,11 +42,13 @@ Current version: **2.4.5** (run `python3 se_gps_navigator.py --version`)
 - **Location tags** — mark a GPS as an Asteroid, Planet, or Station when adding
   it (stations skip the ore-detection prompts entirely, since they have no
   resource).
-- **Multi-ore search and client-side combinations** — search several ore types
-  at once by separating them with commas (for example, `Fe, Si`). When two
+- **Multi-ore search and client-side combinations** — name several ore types
+  naturally (for example, `Fe Si` or `gold and silver`). The first results
+  include one of each requested resource, preferring a shared cluster and then
+  the closest group. When two
   matching markers are within **1 km**, the navigator offers the closest pair
   as one client-only combined GPS marker (for example, `FE/SI`) without
-  changing the shared database.
+  changing the shared database. Enter a result number to copy it directly.
 - **"Where am I"** — paste your current position and find out which cluster
   you're in (or the nearest one, if you're not inside any), with an option to
   copy that cluster's own GPS marker straight to your clipboard.
@@ -164,7 +166,7 @@ or crashing.
 The app can check a small JSON manifest for a newer version:
 
 ```json
-{ "version": "2.4.5", "url": "https://raw.githubusercontent.com/<you>/<repo>/main/se_gps_navigator.py" }
+{ "version": "2.4.6", "url": "https://raw.githubusercontent.com/<you>/<repo>/main/se_gps_navigator.py" }
 ```
 
 Host that manifest wherever's convenient (a raw file in this repo works fine)
